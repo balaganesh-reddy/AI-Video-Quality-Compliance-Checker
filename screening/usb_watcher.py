@@ -35,36 +35,29 @@ def watch(config, callback):
     usb = config
     known = set()
     settle_seconds = float(usb.get("settle_seconds", 5))
+    exclude = tuple(usb.get("exclude_drives", ["C:\\"]))
+    allowed_types = tuple(usb.get("drive_types", [2]))
+    only = tuple(usb.get("only_drives", []))
 
     if usb.get("process_present_at_start", True):
-        known.update(str(drive) for drive in get_removable_drives(
-            tuple(usb.get("drive_types", [2])),
-            tuple(usb.get("exclude_drives", ["C:\\"])),
-            tuple(usb.get("only_drives", [])),
-        ))
+        known.update(str(drive) for drive in get_removable_drives(allowed_types, exclude, only))
 
     pending = {}
     while True:
         current = {
-            str(drive): drive for drive in get_removable_drives(
-                tuple(usb.get("drive_types", [2])),
-                tuple(usb.get("exclude_drives", ["C:\\\"])),
-                tuple(usb.get("only_drives", [])),
-            )
+            str(drive): drive
+            for drive in get_removable_drives(allowed_types, exclude, only)
         }
 
         for drive_name, drive in current.items():
             if drive_name not in known and drive_name not in pending:
                 pending[drive_name] = time.monotonic()
-            if drive_name in pending:
-                if time.monotonic() - pending[drive_name] >= settle_seconds:
-                    callback(drive)
-                    known.add(drive_name)
-                    pending.pop(drive_name, None)
+            if drive_name in pending and time.monotonic() - pending[drive_name] >= settle_seconds:
+                callback(drive)
+                known.add(drive_name)
+                pending.pop(drive_name, None)
 
-        removed = set(known) - set(current)
-        for drive_name in removed:
-            known.discard(drive_name)
+        known.intersection_update(current)
         for drive_name in list(pending):
             if drive_name not in current:
                 pending.pop(drive_name, None)
