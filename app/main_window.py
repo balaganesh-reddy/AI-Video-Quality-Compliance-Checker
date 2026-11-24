@@ -20,21 +20,25 @@ class RulesDialog(QDialog):
     def __init__(self, rules, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Visual Compliance Rules")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(440)
         form = QFormLayout(self)
 
-        self.hand_absence = self._spin(0, 3600, rules.maximum_hand_absence_seconds, 0)
-        self.wrist_visibility = self._spin(0, 1, rules.minimum_well_lit_frame_ratio, 2)
+        self.wrist_visibility = self._spin(0, 1, rules.minimum_wrist_visible_frame_ratio, 2)
+        self.wrist_confidence = self._spin(0, 1, rules.minimum_wrist_visibility_confidence, 2)
+        self.phone_duration = self._spin(1, 600, rules.maximum_phone_use_seconds, 0)
+        self.phone_confidence = self._spin(0, 1, rules.phone_detection_confidence, 2)
         self.lighting_ratio = self._spin(0, 1, rules.minimum_well_lit_frame_ratio, 2)
         self.brightness = self._spin(0, 255, rules.minimum_average_brightness, 0)
-        self.phone_confidence = self._spin(0, 1, rules.phone_detection_confidence, 2)
+        self.hand_absence = self._spin(0, 3600, rules.maximum_hand_absence_seconds, 0)
         self.sample_interval = self._spin(0.25, 30, rules.sample_interval_seconds, 2)
 
-        form.addRow("Max continuous hand absence (seconds)", self.hand_absence)
-        form.addRow("Minimum wrist visibility (0–1)", self.wrist_visibility)
+        form.addRow("Minimum both-wrist visibility ratio (0–1)", self.wrist_visibility)
+        form.addRow("Minimum wrist confidence (0–1)", self.wrist_confidence)
+        form.addRow("Phone-use failure limit (seconds)", self.phone_duration)
+        form.addRow("Phone detection confidence (0–1)", self.phone_confidence)
         form.addRow("Minimum well-lit frame ratio (0–1)", self.lighting_ratio)
         form.addRow("Minimum average brightness (0–255)", self.brightness)
-        form.addRow("Phone detection confidence (0–1)", self.phone_confidence)
+        form.addRow("Max continuous hand absence (seconds)", self.hand_absence)
         form.addRow("Frame sampling interval (seconds)", self.sample_interval)
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -51,11 +55,13 @@ class RulesDialog(QDialog):
 
     def rules(self):
         return ComplianceRules(
-            maximum_hand_absence_seconds=self.hand_absence.value(),
-            minimum_wrist_visibility_confidence=0.5,
+            minimum_wrist_visible_frame_ratio=self.wrist_visibility.value(),
+            minimum_wrist_visibility_confidence=self.wrist_confidence.value(),
+            maximum_phone_use_seconds=self.phone_duration.value(),
+            phone_detection_confidence=self.phone_confidence.value(),
             minimum_well_lit_frame_ratio=self.lighting_ratio.value(),
             minimum_average_brightness=self.brightness.value(),
-            phone_detection_confidence=self.phone_confidence.value(),
+            maximum_hand_absence_seconds=self.hand_absence.value(),
             sample_interval_seconds=self.sample_interval.value(),
         )
 

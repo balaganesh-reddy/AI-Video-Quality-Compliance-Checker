@@ -1,8 +1,9 @@
-"""Video quality checks for hand/wrist visibility, phone use, and lighting.
+"""Video checks for task-wrist visibility, phone activity, and lighting.
 
-These are computer-vision screening signals, not a substitute for human review.
-The phone detector can identify a phone, but cannot determine which social-media
-app is displayed or reliably infer intent.
+These computer-vision checks are estimates and should be validated against real
+videos before they are used for consequential decisions. Phone detection cannot
+identify social-media apps or prove intent; it flags a phone held near a detected
+hand as possible phone use.
 """
 
 import json
@@ -20,7 +21,7 @@ from app.config import ComplianceRules, load_rules
 
 _PHONE_MODEL = None
 _PHONE_MODEL_ERROR = None
-_PHONE_CLASS_ID = 67  # COCO class "cell phone" in the Ultralytics COCO model.
+_PHONE_CLASS_ID = 67  # COCO class "cell phone".
 
 
 def ffprobe_video(path):
@@ -56,26 +57,71 @@ def ffprobe_video(path):
 
 
 def analyze_video(path, rules=None):
-    """Analyze sampled frames using configurable visual compliance checks."""
+    """Analyze a video using explicit rules or the locally saved rules."""
     rules = rules or load_rules()
     path = Path(path)
     metadata = ffprobe_video(path)
     visual = analyze_visual_conditions(path, rules)
+    status = visual.pop("status")
     issues = visual.pop("issues")
-
     return {
         "analyzed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "file_name": path.name,
         "source_path": str(path),
-        "status": "REVIEW" if issues else "PASS",
+        "status": status,
         "issues": "; ".join(issues),
         **metadata,
         **visual,
     }
 
 
+def evaluate_visual_metrics(
+    *, wrist_visible_ratio, phone_use_seconds, well_lit_ratio, rules,
+    phone_detector_available=True, longest_hand_absence_seconds=0.0,
+):
+    """Evaluate measured metrics; separated to make compliance logic testable."""
+    issues = []
+    hard_failures = []
+
+    if wrist_visible_ratio < rules.minimum_wrist_visible_frame_ratio:
+        issue = (
+            f"both wrists clearly visible in only {wrist_visible_ratio:.0%} of sampled frames "
+            f"(minimum {rules.minimum_wrist_visible_frame_ratio:.0%})"
+        )
+        issues.append(issue)
+        hard_failures.append(issue)
+
+    if phone_use_seconds > rules.maximum_phone_use_seconds:
+        issue = (
+            f"possible phone use lasted {phone_use_seconds:.0f}s "
+            f"(limit {rules.maximum_phone_use_seconds:.0f}s)"
+        )
+        issues.append(issue)
+        hard_failures.append(issue)
+
+    if well_lit_ratio < rules.minimum_well_lit_frame_ratio:
+        issue = (
+            f"lighting met the threshold in {well_lit_ratio:.0%} of sampled frames "
+            f"(minimum {rules.minimum_well_lit_frame_ratio:.0%})"
+        )
+        issues.append(issue)
+        hard_failures.append(issue)
+
+    if longest_hand_absence_seconds > rules.maximum_hand_absence_seconds:
+        issues.append(
+            f"no hands detected for about {longest_hand_absence_seconds:.0f}s continuously "
+            f"(limit {rules.maximum_hand_absence_seconds:.0f}s)"
+        )
+
+    if not phone_detector_available:
+        issues.append("phone detector unavailable; phone-use check could not be completed")
+
+    status = "FAIL" if hard_failures else ("REVIEW" if issues else "PASS")
+    return {"status": status, "issues": issues}
+
+
 def analyze_visual_conditions(path, rules=None):
-    """Sample video for hands, wrist landmarks, phone-use signals, and lighting."""
+    """Sample video for bilateral wrist visibility, possible phone use, and lighting."""
     rules = rules or ComplianceRules()
     capture = cv2.VideoCapture(str(path))
     if not capture.isOpened():
@@ -90,17 +136,18 @@ def analyze_visual_conditions(path, rules=None):
     duration = frame_count / fps
     interval = max(0.25, float(rules.sample_interval_seconds))
     timestamps = np.arange(0, duration, interval)
-    issues = []
+    sampled_frames = 0
+    both_wrists_visible_frames = 0
     hand_frames = 0
-    wrist_visible_frames = 0
-    lit_frames = 0
-    dark_frames = 0
-    phone_frames = 0
-    phone_use_frames = 0
+    well_lit_frames = 0
+    brightness_scores = []
+    sharpness_scores = []
     longest_hand_gap = 0.0
     current_hand_gap = 0.0
-    sharpness_scores = []
-    pose_frames = 0
+    longest_phone_run = 0.0
+    current_phone_run = 0.0
+    phone_detected_frames = 0
+    phone_use_frames = 0
     phone_detector_available = True
 
     try:
@@ -116,14 +163,14 @@ def analyze_visual_conditions(path, rules=None):
                 ok, frame = capture.read()
                 if not ok:
                     continue
+                sampled_frames += 1
 
                 height, width = frame.shape[:2]
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 brightness = float(np.mean(gray))
+                brightness_scores.append(brightness)
                 if brightness >= rules.minimum_average_brightness:
-                    lit_frames += 1
-                else:
-                    dark_frames += 1
+                    well_lit_frames += 1
                 sharpness_scores.append(float(cv2.Laplacian(gray, cv2.CV_64F).var()))
 
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -138,55 +185,69 @@ def analyze_visual_conditions(path, rules=None):
 
                 pose_result = pose_model.process(rgb)
                 if pose_result.pose_landmarks:
-                    pose_frames += 1
                     landmarks = pose_result.pose_landmarks.landmark
-                    wrist_ids = (mp.solutions.pose.PoseLandmark.LEFT_WRIST, mp.solutions.pose.PoseLandmark.RIGHT_WRIST)
-                    if any(landmarks[int(i)].visibility >= rules.minimum_wrist_visibility_confidence for i in wrist_ids):
-                        wrist_visible_frames += 1
+                    left = landmarks[int(mp.solutions.pose.PoseLandmark.LEFT_WRIST)]
+                    right = landmarks[int(mp.solutions.pose.PoseLandmark.RIGHT_WRIST)]
+                    # Both task-relevant wrists must be confidently detected and in-frame.
+                    wrists_visible = all(
+                        point.visibility >= rules.minimum_wrist_visibility_confidence
+                        and 0.0 <= point.x <= 1.0
+                        and 0.0 <= point.y <= 1.0
+                        for point in (left, right)
+                    )
+                    if wrists_visible:
+                        both_wrists_visible_frames += 1
 
                 phone_boxes, detector_available = _detect_phone_boxes(
                     frame, rules.phone_detection_confidence
                 )
                 phone_detector_available = phone_detector_available and detector_available
+                possible_phone_use = bool(
+                    phone_boxes and found_hands
+                    and _hand_near_phone(hand_result, phone_boxes, width, height)
+                )
                 if phone_boxes:
-                    phone_frames += 1
-                    if found_hands and _hand_near_phone(hand_result, phone_boxes, width, height):
-                        phone_use_frames += 1
+                    phone_detected_frames += 1
+                if possible_phone_use:
+                    phone_use_frames += 1
+                    current_phone_run += interval
+                    longest_phone_run = max(longest_phone_run, current_phone_run)
+                else:
+                    current_phone_run = 0.0
     finally:
         capture.release()
 
-    analyzed_frames = max(1, len(timestamps))
-    effective_hand_gap = max(longest_hand_gap, current_hand_gap)
-    lit_ratio = lit_frames / analyzed_frames
-    wrist_ratio = wrist_visible_frames / analyzed_frames
-
-    if effective_hand_gap > rules.maximum_hand_absence_seconds:
-        issues.append(f"hands absent for about {effective_hand_gap:.0f}s continuously (limit {rules.maximum_hand_absence_seconds:.0f}s)")
-    if wrist_ratio < rules.minimum_well_lit_frame_ratio:
-        issues.append(f"wrists clearly visible in only {wrist_ratio:.0%} of sampled frames")
-    if lit_ratio < rules.minimum_well_lit_frame_ratio:
-        issues.append(f"lighting below threshold in {dark_frames}/{analyzed_frames} sampled frames")
-    if phone_use_frames:
-        issues.append(f"possible phone use detected in {phone_use_frames} sampled frame(s)")
-    elif phone_frames:
-        issues.append(f"phone detected in {phone_frames} sampled frame(s); review for use")
+    denominator = max(1, sampled_frames)
+    wrist_ratio = both_wrists_visible_frames / denominator
+    well_lit_ratio = well_lit_frames / denominator
+    hand_gap = max(longest_hand_gap, current_hand_gap)
+    decision = evaluate_visual_metrics(
+        wrist_visible_ratio=wrist_ratio,
+        phone_use_seconds=longest_phone_run,
+        well_lit_ratio=well_lit_ratio,
+        rules=rules,
+        phone_detector_available=phone_detector_available,
+        longest_hand_absence_seconds=hand_gap,
+    )
 
     return {
-        "hand_visible_frame_ratio": round(hand_frames / analyzed_frames, 3),
-        "longest_hand_absence_seconds": round(effective_hand_gap, 2),
-        "wrist_visible_frame_ratio": round(wrist_ratio, 3),
-        "average_brightness": round(float(np.mean([0])) if not (lit_frames + dark_frames) else 0, 2),
-        "well_lit_frame_ratio": round(lit_ratio, 3),
-        "phone_detected_frames": phone_frames,
+        "status": decision["status"],
+        "issues": decision["issues"],
+        "hand_visible_frame_ratio": round(hand_frames / denominator, 3),
+        "longest_hand_absence_seconds": round(hand_gap, 2),
+        "both_wrists_visible_frame_ratio": round(wrist_ratio, 3),
+        "average_brightness": round(float(np.mean(brightness_scores)), 2) if brightness_scores else None,
+        "well_lit_frame_ratio": round(well_lit_ratio, 3),
+        "phone_detected_frames": phone_detected_frames,
         "possible_phone_use_frames": phone_use_frames,
+        "longest_possible_phone_use_seconds": round(longest_phone_run, 2),
         "phone_detection_available": phone_detector_available,
         "sharpness_score": round(float(np.mean(sharpness_scores)), 2) if sharpness_scores else None,
-        "issues": issues,
     }
 
 
 def _detect_phone_boxes(frame, confidence):
-    """Use optional Ultralytics COCO model; initialize/download weights on demand."""
+    """Use the optional Ultralytics COCO model, loading weights on first use."""
     global _PHONE_MODEL, _PHONE_MODEL_ERROR
     try:
         from ultralytics import YOLO
@@ -194,7 +255,9 @@ def _detect_phone_boxes(frame, confidence):
             _PHONE_MODEL = YOLO("yolo11n.pt")
         if _PHONE_MODEL is None:
             return [], False
-        prediction = _PHONE_MODEL.predict(frame, verbose=False, conf=confidence, classes=[_PHONE_CLASS_ID])[0]
+        prediction = _PHONE_MODEL.predict(
+            frame, verbose=False, conf=confidence, classes=[_PHONE_CLASS_ID]
+        )[0]
         boxes = prediction.boxes.xyxy.cpu().numpy().tolist() if prediction.boxes is not None else []
         return boxes, True
     except Exception as exc:
@@ -210,10 +273,11 @@ def _hand_near_phone(hand_result, phone_boxes, width, height):
         ys = [point.y * height for point in hand.landmark]
         hand_box = (min(xs), min(ys), max(xs), max(ys))
         for phone in phone_boxes:
-            # Expand hand bbox modestly to tolerate detector/landmark localization error.
             pad = max(width, height) * 0.03
-            if not (hand_box[2] + pad < phone[0] or phone[2] + pad < hand_box[0]
-                    or hand_box[3] + pad < phone[1] or phone[3] + pad < hand_box[1]):
+            if not (
+                hand_box[2] + pad < phone[0] or phone[2] + pad < hand_box[0]
+                or hand_box[3] + pad < phone[1] or phone[3] + pad < hand_box[1]
+            ):
                 return True
     return False
 

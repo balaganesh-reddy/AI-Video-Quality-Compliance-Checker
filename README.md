@@ -1,21 +1,21 @@
 # AI Video Quality Compliance Checker
 
-Windows desktop application for reviewing video quality/compliance from USB drives. The initial checks focus on the three requested visual conditions: hands/wrists visible during the task, possible mobile-phone use, and adequate lighting.
+Windows desktop application for reviewing video quality/compliance from USB drives. It focuses on bilateral wrist visibility, prolonged possible mobile-phone use, and lighting.
 
-## Checks
+## Compliance checks
 
-- **Hands/wrists:** samples frames and flags continuous hand absence beyond the configured threshold (default 60 seconds); estimates wrist landmark visibility.
-- **Phone use:** detects the COCO `cell phone` class and flags frames where a detected phone is near a detected hand. Phone detection is a review signal only; it cannot identify social-media apps or determine what is shown on a phone screen.
-- **Lighting:** measures average grayscale brightness in sampled frames and reports the well-lit-frame ratio.
-- Video metadata is reported for reference. Minimum/maximum video duration are not used as pass/fail rules.
+- **Wrist visibility (critical):** both wrist landmarks must be confidently visible and in-frame. Default minimum is 90% of sampled frames; falling below it marks the video **FAIL**.
+- **Possible phone use:** a phone detected near a hand is counted as possible use. A continuous detected period longer than 120 seconds marks the video **FAIL**. Change the limit to 60–120 seconds in **Visual Rules** if your policy is stricter. The detector cannot determine whether a person is using social media or what appears on the screen.
+- **Lighting:** insufficient brightness/coverage marks the video **FAIL** according to configurable thresholds.
+- **Hand absence:** a long absence remains a review signal; it is not the primary wrist-motion criterion.
 
-These automated signals can miss or misclassify content due to camera angle, occlusion, lighting, frame rate, model limitations, and the nature of the task. Review flagged and unflagged videos before making consequential decisions. The app processes video locally; the YOLO model weights may be downloaded the first time phone detection is used.
+The app samples frames at the configured interval, so short events between samples may be missed. Occlusion, camera angle, PPE, blur, and detector limitations can also cause false positives/negatives. Validate thresholds on representative videos and have a human review results before consequential decisions. Video duration itself is not a pass/fail condition.
 
 ## Windows setup
 
-1. Install Python 3.11 (MediaPipe support depends on Python/platform compatibility).
+1. Install Python 3.11 (MediaPipe support depends on platform/Python compatibility).
 2. Install FFmpeg and add `ffprobe` to `PATH`.
-3. In PowerShell, create an environment and install dependencies:
+3. In PowerShell:
 
 ```powershell
 py -3.11 -m venv .venv
@@ -25,18 +25,18 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## Configure conditions
+Phone detection uses an Ultralytics COCO model and may download its model weights at first use. All video processing is local.
 
-Choose **Visual Rules** in the application. Settings are saved in the local, ignored `compliance_rules.json` file. Defaults:
+## Adjusting rules
 
-- Maximum continuous hand absence: 60 seconds
-- Wrist/lighting visibility ratio: 75%
-- Minimum average brightness: 55 on a 0–255 grayscale scale
-- Phone detection confidence: 0.35
-- Frame sampling interval: 1 second
+Choose **Visual Rules** in the app. Settings are stored in the local, ignored `compliance_rules.json` file. Defaults include a 120-second phone-use limit and 90% bilateral wrist visibility. The phone limit is configurable from 1 to 600 seconds.
 
-The task itself is not known to the app, so it cannot yet decide whether the correct task or all required objects are visible. Wrist/hand and brightness checks are configurable screening proxies, not task-specific validation.
+## Tests
+
+```powershell
+python -m unittest discover -s tests -v
+```
 
 ## Google Sheets export
 
-Configure a Google service account as described in `.env.example` and the Google Cloud console, then check **Export to Google Sheets** before scanning.
+Set up a Google service account as described in `.env.example`, then select **Export to Google Sheets** before scanning.
