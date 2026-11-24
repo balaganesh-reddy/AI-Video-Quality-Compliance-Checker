@@ -5,16 +5,16 @@ from pathlib import Path
 
 @dataclass
 class ComplianceRules:
-    # Fail when both task-relevant wrists are not clearly visible for this fraction of samples.
+    # Fail when a sampled frame contains a face that the age model assigns to a
+    # child/minor-like age bucket with at least this confidence.
+    maximum_phone_use_seconds: float = 120.0
     minimum_wrist_visible_frame_ratio: float = 0.90
     minimum_wrist_visibility_confidence: float = 0.60
-    # Fail when likely phone use persists beyond this duration (default 2 minutes).
-    maximum_phone_use_seconds: float = 120.0
-    phone_detection_confidence: float = 0.35
-    # Lighting requirements.
     minimum_well_lit_frame_ratio: float = 0.75
     minimum_average_brightness: float = 55.0
-    # Retain general hand absence as an additional review signal.
+    phone_detection_confidence: float = 0.35
+    nsfw_detection_confidence: float = 0.65
+    minor_detection_confidence: float = 0.60
     maximum_hand_absence_seconds: float = 60.0
     sample_interval_seconds: float = 1.0
 
@@ -26,8 +26,8 @@ def load_rules(path="compliance_rules.json"):
     with config_path.open("r", encoding="utf-8") as handle:
         values = json.load(handle)
     defaults = asdict(ComplianceRules())
-    valid_values = {key: value for key, value in values.items() if key in defaults}
-    return ComplianceRules(**{**defaults, **valid_values})
+    valid = {key: value for key, value in values.items() if key in defaults}
+    return ComplianceRules(**{**defaults, **valid})
 
 
 def save_rules(rules, path="compliance_rules.json"):

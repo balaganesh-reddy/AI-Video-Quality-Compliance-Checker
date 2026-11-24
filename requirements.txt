@@ -7,3 +7,6 @@ google-auth>=2.29
 python-dotenv>=1.0
 mediapipe>=0.10.14
 ultralytics>=8.3.0
+transformers>=4.44
+torch>=2.2
+Pillow>=10.4
