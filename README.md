@@ -1,33 +1,30 @@
 # AI Video Quality Compliance Checker
 
-Windows desktop application for USB video screening.
+A Windows desktop application that detects removable/USB drives and recursively analyzes supported video files and ROS MCAP recordings.
 
 ## Supported inputs
 
-- Standard video files: MP4, MOV, MKV, AVI, WMV, M4V, MPEG, MPG, and WebM.
-- MCAP recordings containing supported image/video topics.
+- Standard video: MP4, MOV, MKV, AVI, WMV, M4V, MPEG, MPG, and WebM
+- MCAP: recordings containing supported image or video topics
 
-MCAP support currently extracts frames from common ROS/ROS 2 and Foxglove topics:
+### MCAP topics
+
+Extraction currently supports:
 
 - `sensor_msgs/msg/CompressedImage`
 - `sensor_msgs/msg/Image`
-- Foxglove `CompressedImage` and `RawImage`
-- Foxglove `CompressedVideo`
+- Foxglove and common `CompressedImage`/`RawImage` topics
+- Foxglove `CompressedVideo` where the payload codec is H264, H265/HEVC, or AV1
 
-Sensor images are reconstructed into a temporary 10 FPS MP4 for metadata and visual analysis. MCAP files that contain no supported image/video topic are reported as unsupported. Raw encodings include RGB8, BGR8, RGBA8, BGRA8, MONO8, and MONO16.
+Raw-image encodings supported include RGB8, BGR8, RGBA8, BGRA8, MONO8, and MONO16. Extracted frames are written to a temporary MP4 and analyzed by the existing FFprobe/OpenCV pipeline. The temporary file is deleted after analysis.
 
-## Safety classifications
-
-- **Minor-like appearance:** a detected face classified into a child/minor-like age bucket is marked `FAIL` and is routed to the dedicated `NSFW` Google Sheet.
-- **NSFW:** sampled frames classified above the configured confidence are marked `FAIL` and sent to the same dedicated `NSFW` sheet.
-- **Wrists and hands:** insufficient bilateral wrist visibility and prolonged phone use remain hard quality failures.
-- **Lighting:** insufficient sampled-frame brightness remains a hard quality failure.
+MCAP files with no supported topic are reported as an error rather than silently passing.
 
 ## Setup
 
-1. Install Python 3.11 (MediaPipe support depends on platform/Python compatibility).
-2. Install FFmpeg and add `ffprobe` to `PATH`.
-3. Install dependencies:
+1. Install Python 3.11 or newer.
+2. Install FFmpeg and add `ffmpeg` and `ffprobe` to `PATH`.
+3. Create an environment and install dependencies:
 
 ```powershell
 py -3.11 -m venv .venv
@@ -36,4 +33,12 @@ pip install -r requirements.txt
 python main.py
 ```
 
-The MCAP reader requires `mcap`, `mcap-ros1-support`, `mcap-ros2-support`, and `rosbags`. It does not upload recordings or extracted frames.
+For MCAP support, `rosbags` provides the recording reader and `mcap` provides MCAP parsing.
+
+## Tests
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+The app reads source files directly and does not modify or delete them.

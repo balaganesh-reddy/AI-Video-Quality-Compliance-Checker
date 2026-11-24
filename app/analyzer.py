@@ -9,12 +9,20 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from app.config import load_rules
+
+DEFAULT_RULES = {
+    "minimum_width": 1280,
+    "minimum_height": 720,
+    "minimum_fps": 24,
+    "minimum_duration_seconds": 1,
+    "maximum_duration_seconds": 7200,
+}
 
 
 def ffprobe_video(path):
     if not shutil.which("ffprobe"):
         raise RuntimeError("ffprobe was not found. Install FFmpeg and add it to PATH.")
+
     command = [
         "ffprobe", "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=width,height,avg_frame_rate,codec_name,bit_rate,duration:format=duration,size",
@@ -23,12 +31,15 @@ def ffprobe_video(path):
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     if completed.returncode:
         raise RuntimeError(completed.stderr.strip() or "ffprobe could not read the video")
+
     data = json.loads(completed.stdout)
     stream = (data.get("streams") or [{}])[0]
     video_format = data.get("format") or {}
+
     frame_rate = _frame_rate(stream.get("avg_frame_rate", "0/1"))
     duration = _float(stream.get("duration")) or _float(video_format.get("duration"))
     bit_rate = _int(stream.get("bit_rate")) or _int(video_format.get("bit_rate"))
+
     return {
         "width": _int(stream.get("width")),
         "height": _int(stream.get("height")),
@@ -42,7 +53,7 @@ def ffprobe_video(path):
 
 
 def analyze_video(path, rules=None):
-    rules = rules or load_rules()
+    rules = {**DEFAULT_RULES, **(rules or {})}
     path = Path(path)
     extraction = None
 
@@ -55,16 +66,17 @@ def analyze_video(path, rules=None):
     try:
         metadata = ffprobe_video(analysis_path)
         failures = []
-        if metadata["width"] < rules.minimum_width:
-            failures.append(f"width<{rules.minimum_width}")
-        if metadata["height"] < rules.minimum_height:
-            failures.append(f"height<{rules.minimum_height}")
-        if metadata["fps"] < rules.minimum_fps:
-            failures.append(f"fps<{rules.minimum_fps}")
-        if metadata["duration_seconds"] < rules.minimum_duration_seconds:
+        if metadata["width"] < rules["minimum_width"]:
+            failures.append(f"width<{rules['minimum_width']}")
+        if metadata["height"] < rules["minimum_height"]:
+            failures.append(f"height<{rules['minimum_height']}")
+        if metadata["fps"] < rules["minimum_fps"]:
+            failures.append(f"fps<{rules['minimum_fps']}")
+        if metadata["duration_seconds"] < rules["minimum_duration_seconds"]:
             failures.append("duration too short")
-        if metadata["duration_seconds"] > rules.maximum_duration_seconds:
+        if metadata["duration_seconds"] > rules["maximum_duration_seconds"]:
             failures.append("duration too long")
+
         sharpness = sample_sharpness(analysis_path)
         return {
             "analyzed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -81,7 +93,6 @@ def analyze_video(path, rules=None):
 
 
 def sample_sharpness(path, frame_count=5):
-    """Return mean Laplacian variance from evenly sampled frames."""
     capture = cv2.VideoCapture(str(path))
     if not capture.isOpened():
         return None

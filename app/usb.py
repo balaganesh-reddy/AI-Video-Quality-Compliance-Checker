@@ -5,7 +5,6 @@ from pathlib import Path
 
 import psutil
 
-
 VIDEO_EXTENSIONS = {
     ".mp4", ".mov", ".mkv", ".avi", ".wmv", ".m4v", ".mpeg", ".mpg", ".webm",
     ".mcap",
