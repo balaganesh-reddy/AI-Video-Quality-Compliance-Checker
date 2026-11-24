@@ -7,7 +7,7 @@ from pathlib import Path
 import psutil
 
 
-def get_removable_drives(allowed_types=(2,), exclude=("C:\\",), only=()):
+def get_removable_drives(allowed_types=(2, 3), exclude=("C:\\",), only=()):
     found = []
     normalized_only = {str(item).rstrip("\\").lower() for item in only}
     normalized_exclude = {str(item).rstrip("\\").lower() for item in exclude}
@@ -21,25 +21,29 @@ def get_removable_drives(allowed_types=(2,), exclude=("C:\\",), only=()):
             continue
         if normalized_only and normalized not in normalized_only:
             continue
+
         try:
             drive_type = ctypes.windll.kernel32.GetDriveTypeW(str(mount.anchor or mount) + "\\")
         except Exception:
-            drive_type = 2 if "removable" in partition.opts.lower() else 0
+            options = partition.opts.lower()
+            drive_type = 2 if "removable" in options else 3
+
         if drive_type in allowed_types:
             found.append(mount)
     return sorted(set(found), key=lambda item: str(item).lower())
 
 
 def watch(config, callback):
-    """Poll Windows removable drives and call callback(drive) after insertion settles."""
+    """Poll Windows drives and call callback(drive) after insertion settles."""
     usb = config
-    known = set()
     settle_seconds = float(usb.get("settle_seconds", 5))
     exclude = tuple(usb.get("exclude_drives", ["C:\\"]))
-    allowed_types = tuple(usb.get("drive_types", [2]))
+    allowed_types = tuple(usb.get("drive_types", [2, 3]))
     only = tuple(usb.get("only_drives", []))
 
-    if usb.get("process_present_at_start", True):
+    known = set()
+
+    if not usb.get("process_present_at_start", True):
         known.update(str(drive) for drive in get_removable_drives(allowed_types, exclude, only))
 
     pending = {}

@@ -8,7 +8,7 @@
   "usb": {
     "poll_seconds": 3,
     "settle_seconds": 5,
-    "drive_types": [2],
+    "drive_types": [2, 3],
     "exclude_drives": ["C:\\"],
     "only_drives": [],
     "process_present_at_start": true,
