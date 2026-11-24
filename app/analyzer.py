@@ -3,19 +3,13 @@
 import json
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-
-DEFAULT_RULES = {
-    "minimum_width": 1280,
-    "minimum_height": 720,
-    "minimum_fps": 24,
-    "minimum_duration_seconds": 1,
-    "maximum_duration_seconds": 7200,
-}
+from app.config import load_rules
 
 
 def ffprobe_video(path):
@@ -52,31 +46,31 @@ def ffprobe_video(path):
 
 
 def analyze_video(path, rules=None):
-    rules = {**DEFAULT_RULES, **(rules or {})}
+    """Analyze a video using a ComplianceRules object or configured JSON rules."""
+    rules = rules or load_rules()
     path = Path(path)
     metadata = ffprobe_video(path)
 
     failures = []
-    if metadata["width"] < rules["minimum_width"]:
-        failures.append(f"width<{rules['minimum_width']}")
-    if metadata["height"] < rules["minimum_height"]:
-        failures.append(f"height<{rules['minimum_height']}")
-    if metadata["fps"] < rules["minimum_fps"]:
-        failures.append(f"fps<{rules['minimum_fps']}")
-    if metadata["duration_seconds"] < rules["minimum_duration_seconds"]:
+    if metadata["width"] < rules.minimum_width:
+        failures.append(f"width<{rules.minimum_width}")
+    if metadata["height"] < rules.minimum_height:
+        failures.append(f"height<{rules.minimum_height}")
+    if metadata["fps"] < rules.minimum_fps:
+        failures.append(f"fps<{rules.minimum_fps}")
+    if metadata["duration_seconds"] < rules.minimum_duration_seconds:
         failures.append("duration too short")
-    if metadata["duration_seconds"] > rules["maximum_duration_seconds"]:
+    if metadata["duration_seconds"] > rules.maximum_duration_seconds:
         failures.append("duration too long")
 
-    sharpness = sample_sharpness(path)
-
     return {
+        "analyzed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "file_name": path.name,
         "source_path": str(path),
         "status": "PASS" if not failures else "FAIL",
         "issues": "; ".join(failures) if failures else "",
         **metadata,
-        "sharpness_score": sharpness,
+        "sharpness_score": sample_sharpness(path),
     }
 
 

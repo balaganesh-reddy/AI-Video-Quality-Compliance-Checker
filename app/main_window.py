@@ -4,32 +4,80 @@ import csv
 
 from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFileDialog, QHeaderView,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QFileDialog, QFormLayout, QDoubleSpinBox, QSpinBox, QHeaderView,
     QHBoxLayout, QLabel, QMainWindow, QProgressBar, QPushButton,
     QStatusBar, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from app.analyzer import analyze_video
+from app.config import ComplianceRules, load_rules, save_rules
 from app.sheets import export_results
 from app.usb import find_videos, get_removable_drives
+
+
+class RulesDialog(QDialog):
+    def __init__(self, rules, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Compliance Rules")
+        self.setMinimumWidth(360)
+        form = QFormLayout(self)
+
+        self.width = QSpinBox()
+        self.width.setRange(1, 7680)
+        self.width.setValue(rules.minimum_width)
+        self.height = QSpinBox()
+        self.height.setRange(1, 4320)
+        self.height.setValue(rules.minimum_height)
+        self.fps = QDoubleSpinBox()
+        self.fps.setRange(0, 240)
+        self.fps.setValue(rules.minimum_fps)
+        self.min_duration = QDoubleSpinBox()
+        self.min_duration.setRange(0, 86400)
+        self.min_duration.setValue(rules.minimum_duration_seconds)
+        self.max_duration = QDoubleSpinBox()
+        self.max_duration.setRange(1, 604800)
+        self.max_duration.setValue(rules.maximum_duration_seconds)
+
+        form.addRow("Minimum width", self.width)
+        form.addRow("Minimum height", self.height)
+        form.addRow("Minimum FPS", self.fps)
+        form.addRow("Minimum duration (seconds)", self.min_duration)
+        form.addRow("Maximum duration (seconds)", self.max_duration)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def rules(self):
+        return ComplianceRules(
+            minimum_width=self.width.value(),
+            minimum_height=self.height.value(),
+            minimum_fps=self.fps.value(),
+            minimum_duration_seconds=self.min_duration.value(),
+            maximum_duration_seconds=self.max_duration.value(),
+        )
 
 
 class ScanWorker(QThread):
     progress = Signal(int, int, str)
     finished_scan = Signal(list)
 
-    def __init__(self, files):
+    def __init__(self, files, rules):
         super().__init__()
         self.files = files
+        self.rules = rules
 
     def run(self):
         results = []
         for index, file in enumerate(self.files, start=1):
             self.progress.emit(index - 1, len(self.files), f"Analyzing {file.name}")
             try:
-                results.append(analyze_video(file))
+                results.append(analyze_video(file, self.rules))
             except Exception as exc:
                 results.append({
+                    "analyzed_at": "",
                     "file_name": file.name,
                     "source_path": str(file),
                     "status": "ERROR",
@@ -46,6 +94,7 @@ class MainWindow(QMainWindow):
         self.resize(1100, 650)
         self.results = []
         self.worker = None
+        self.rules = load_rules()
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -56,6 +105,8 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.drive_box, 2)
         self.browse_button = QPushButton("Browse Folder")
         controls.addWidget(self.browse_button)
+        self.rules_button = QPushButton("Rules")
+        controls.addWidget(self.rules_button)
         self.scan_button = QPushButton("Scan Videos")
         controls.addWidget(self.scan_button)
         self.export_button = QPushButton("Export CSV")
@@ -75,6 +126,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
 
         self.browse_button.clicked.connect(self.browse_folder)
+        self.rules_button.clicked.connect(self.edit_rules)
         self.scan_button.clicked.connect(self.start_scan)
         self.export_button.clicked.connect(self.export_csv)
 
@@ -83,9 +135,18 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self.refresh_drives)
         self.timer.start(2000)
 
+    def edit_rules(self):
+        dialog = RulesDialog(self.rules, self)
+        if dialog.exec():
+            self.rules = dialog.rules()
+            save_rules(self.rules)
+            self.statusBar().showMessage("Compliance rules saved")
+
     def refresh_drives(self):
         drives = get_removable_drives()
         current = self.drive_box.currentText()
+        if current and current not in drives:
+            return
         self.drive_box.blockSignals(True)
         self.drive_box.clear()
         self.drive_box.addItems(drives)
@@ -116,7 +177,7 @@ class MainWindow(QMainWindow):
 
         self.progress.setValue(0)
         self.scan_button.setEnabled(False)
-        self.worker = ScanWorker(files)
+        self.worker = ScanWorker(files, self.rules)
         self.worker.progress.connect(self.update_progress)
         self.worker.finished_scan.connect(self.scan_finished)
         self.worker.start()
@@ -163,7 +224,6 @@ class MainWindow(QMainWindow):
         if not output:
             return
         with open(output, "w", newline="", encoding="utf-8") as handle:
-            import csv
             writer = csv.DictWriter(handle, fieldnames=list(self.results[0].keys()))
             writer.writeheader()
             writer.writerows(self.results)
