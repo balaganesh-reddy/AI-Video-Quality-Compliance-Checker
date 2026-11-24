@@ -1,0 +1,39 @@
+{
+  "extraction": {
+    "image_topics": "auto",
+    "sample_fps": 2.0,
+    "timestamp_source": "log_time",
+    "skip_depth_topics": true
+  },
+  "usb": {
+    "poll_seconds": 3,
+    "settle_seconds": 5,
+    "drive_types": [2],
+    "exclude_drives": ["C:\\"],
+    "only_drives": [],
+    "process_present_at_start": true,
+    "pattern": "*.mcap"
+  },
+  "paths": {
+    "output_dir": "output",
+    "results_dir": "output/results",
+    "pending_dir": "output/pending",
+    "backup_dir": "output/backups",
+    "audit_log": "output/audit.log",
+    "log_file": "output/screening.log"
+  },
+  "privacy": {
+    "save_review_frames": false,
+    "review_frames_dir": "output/review_frames",
+    "retention_days": 14,
+    "max_saved_fail_frames": 50,
+    "max_saved_review_frames": 20
+  },
+  "quality": {
+    "min_side_px": 160,
+    "blur_min": 15.0,
+    "dark_mean_max": 12.0,
+    "bright_mean_min": 245.0,
+    "flat_std_min": 3.0
+  }
+}
