@@ -5,10 +5,10 @@ from pathlib import Path
 import streamlit as st
 
 from app.analyzer import analyze_video
-from app.config import ComplianceRules, load_rules
+from app.config import ComplianceRules
 
 
-st.set_page.set_page_config(page_title="Video Compliance Analyzer", layout="wide")
+st.set_page_config(page_title="Video Compliance Analyzer", layout="wide")
 
 st.title("Video Compliance Analyzer")
 st.caption("Online review for wrist visibility, possible phone use, lighting, and hand absence")
@@ -86,15 +86,16 @@ if st.button("Analyze uploaded videos", type="primary", disabled=not uploaded):
         columns[2].metric("ERROR", errors)
 
         fields = list(dict.fromkeys(key for result in results for key in result))
-        output = tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", newline="", encoding="utf-8")
-        with output:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", newline="", encoding="utf-8") as output:
             writer = csv.DictWriter(output, fieldnames=fields)
             writer.writeheader()
             writer.writerows(results)
+            output_path = Path(output.name)
 
         st.download_button(
             "Download CSV results",
-            data=Path(output.name).read_bytes(),
+            data=output_path.read_bytes(),
             file_name="video-compliance-results.csv",
             mime="text/csv",
         )
+        output_path.unlink(missing_ok=True)
