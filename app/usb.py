@@ -5,8 +5,10 @@ from pathlib import Path
 
 import psutil
 
+
 VIDEO_EXTENSIONS = {
     ".mp4", ".mov", ".mkv", ".avi", ".wmv", ".m4v", ".mpeg", ".mpg", ".webm",
+    ".mcap",
 }
 
 
@@ -32,7 +34,7 @@ def _drive_type(path):
 
 
 def find_videos(folder):
-    """Recursively find supported video files below a USB folder."""
+    """Recursively find supported video and MCAP files below a folder."""
     root = Path(folder)
     if not root.exists():
         return []

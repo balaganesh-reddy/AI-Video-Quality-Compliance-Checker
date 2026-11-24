@@ -2,20 +2,32 @@
 
 Windows desktop application for USB video screening.
 
+## Supported inputs
+
+- Standard video files: MP4, MOV, MKV, AVI, WMV, M4V, MPEG, MPG, and WebM.
+- MCAP recordings containing supported image/video topics.
+
+MCAP support currently extracts frames from common ROS/ROS 2 and Foxglove topics:
+
+- `sensor_msgs/msg/CompressedImage`
+- `sensor_msgs/msg/Image`
+- Foxglove `CompressedImage` and `RawImage`
+- Foxglove `CompressedVideo`
+
+Sensor images are reconstructed into a temporary 10 FPS MP4 for metadata and visual analysis. MCAP files that contain no supported image/video topic are reported as unsupported. Raw encodings include RGB8, BGR8, RGBA8, BGRA8, MONO8, and MONO16.
+
 ## Safety classifications
 
-- **Minor-like appearance:** any sampled detected face classified into a child/minor-like age bucket is marked `FAIL` and is immediately routed to the dedicated `NSFW` Google Sheet. Because visual age estimation is uncertain, the app stores `minor_like_detected` and confidence rather than asserting a verified age.
+- **Minor-like appearance:** a detected face classified into a child/minor-like age bucket is marked `FAIL` and is routed to the dedicated `NSFW` Google Sheet.
 - **NSFW:** sampled frames classified above the configured confidence are marked `FAIL` and sent to the same dedicated `NSFW` sheet.
 - **Wrists and hands:** insufficient bilateral wrist visibility and prolonged phone use remain hard quality failures.
 - **Lighting:** insufficient sampled-frame brightness remains a hard quality failure.
-
-The classifiers are probabilistic screening tools. They can miss content and can produce false positives. Downloaded model weights are processed locally; no video frame is uploaded by this app.
 
 ## Setup
 
 1. Install Python 3.11 (MediaPipe support depends on platform/Python compatibility).
 2. Install FFmpeg and add `ffprobe` to `PATH`.
-3. Create and activate a virtual environment, then install dependencies:
+3. Install dependencies:
 
 ```powershell
 py -3.11 -m venv .venv
@@ -24,8 +36,4 @@ pip install -r requirements.txt
 python main.py
 ```
 
-At first use, Transformers may download the age and NSFW models; Ultralytics may download `yolo11n.pt`.
-
-## Google Sheets
-
-Regular results are written to `Results`. Any row with `minor_like_detected=true` or `nsfw_detected=true` is also written to the dedicated `NSFW` worksheet. Restrict access to that worksheet according to your data policy.
+The MCAP reader requires `mcap`, `mcap-ros1-support`, `mcap-ros2-support`, and `rosbags`. It does not upload recordings or extracted frames.
